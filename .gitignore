@@ -1,8 +1,10 @@
 # Database
 database.json
+data/database.json
 
 # Auth (passkey credential + session tokens)
 auth.json
+data/auth.json
 
 # Python
 __pycache__/
@@ -41,3 +43,4 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+.docker-compose.yml

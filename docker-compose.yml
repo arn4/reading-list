@@ -1,15 +1,16 @@
 services:
   reading-list:
-    image: "${IMAGE:-larna/reading-list:latest}"
-    pull_policy: always
+    build:
+      context: .
+    image: reading-list-local:dev
     container_name: reading-list
-    restart: unless-stopped
     env_file:
       - .env
     ports:
       - "${HOST_PORT:-8000}:${PORT:-8000}"
     volumes:
-      - reading-list-data:/data
-
-volumes:
-  reading-list-data:
+      - ./data:/data
+      - ./app.py:/app/app.py:ro
+      - ./auth.py:/app/auth.py:ro
+      - ./metadata.py:/app/metadata.py:ro
+      - ./static:/app/static:ro

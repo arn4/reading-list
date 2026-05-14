@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Reading List v0.3</title>
+<title>Reading List v0.3.1</title>
 <style>
   :root {
     --fg: #1a1a1a;
@@ -109,8 +109,23 @@
   td.rating:hover { background: var(--accent-bg); }
   .rating-stars { color: var(--gold); }
   .rating-empty { color: var(--muted); font-style: italic; font-size: 0.85em; }
-  .read-notes { min-height: 3.2em; font-size: 0.85em; }
-  .read-actions { display: flex; gap: 0.4em; flex-wrap: wrap; }
+  .read-item { background: var(--card); border: 1px solid var(--border); padding: 1em; margin-bottom: 1em; border-radius: 6px; }
+  .read-item-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.75em; gap: 0.5em; }
+  .read-item-title { font-weight: 600; flex: 1; }
+  .read-item-meta { color: var(--muted); font-size: 0.85em; margin-bottom: 0.5em; }
+  .read-item-summary { color: var(--muted); font-size: 0.85em; margin-bottom: 0.75em; }
+  .read-notes { width: 100%; min-height: 6em; padding: 0.5em; font-size: 0.85em; border: 1px solid var(--border); border-radius: 4px; font-family: inherit; }
+  .read-item-actions { display: flex; gap: 0.35em; align-items: center; }
+  .btn-icon-small { padding: 0.3em 0.4em; font-size: 0.8em; line-height: 1; }
+  .btn-delete-icon { background: #fdd; border-color: #f88; color: #c00; }
+  .btn-delete-icon:hover:not(:disabled) { background: #f99; }
+  .btn-save-icon { background: #ddf; border-color: #88f; color: #00c; }
+  .btn-save-icon:hover:not(:disabled) { background: #99f; }
+  .rating-input { display: flex; gap: 0.25em; margin-bottom: 1em; }
+  .rating-input .star { font-size: 1.6em; cursor: pointer; color: #ddd; user-select: none; }
+  .rating-input .star.active { color: var(--gold); }
+  .rating-input .star:hover { color: var(--gold); opacity: 0.7; }
+  .notes-input { width: 100%; min-height: 5em; padding: 0.5em; font-size: 0.9em; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 1em; font-family: inherit; }
 
   .btn-icon { padding: 0.35em 0.55em; font-size: 0.85em; line-height: 1; }
 
@@ -165,7 +180,7 @@
 <div id="app-root">
 
 <div class="header">
-  <h1>Reading List <span class="ver">v0.3</span></h1>
+  <h1>Reading List <span class="ver">v0.3.1</span></h1>
   <button id="btn-logout" class="btn-icon" title="Sign out">Sign out</button>
 </div>
 
@@ -236,10 +251,24 @@
 
 <!-- RATING MODAL -->
 <div class="modal-bg" id="rating-modal">
-  <div class="modal" style="max-width: 400px;">
+  <div class="modal" style="max-width: 450px;">
     <h3>How was it?</h3>
     <p id="rating-title" style="color: var(--muted); font-size: 0.95em;"></p>
-    <div class="stars" id="stars">
+    <div style="margin-bottom: 1em;">
+      <label style="font-size: 0.85em;">Rating:</label>
+      <div class="rating-input" id="rating-stars">
+        <span class="star" data-val="1">★</span>
+        <span class="star" data-val="2">★</span>
+        <span class="star" data-val="3">★</span>
+        <span class="star" data-val="4">★</span>
+        <span class="star" data-val="5">★</span>
+      </div>
+    </div>
+    <div id="rating-notes-section" style="display: none;">
+      <label style="font-size: 0.85em;">Your thoughts:</label>
+      <textarea id="rating-notes-input" class="notes-input" placeholder="What did you think about this paper?"></textarea>
+    </div>
+    <div style="display: none;" id="stars">
       <span class="star" data-val="1">★</span>
       <span class="star" data-val="2">★</span>
       <span class="star" data-val="3">★</span>
@@ -593,28 +622,57 @@ async function refreshQueueCount() {
 
 // ---------- RATING ----------
 // mode: 'read' (mark queue item read) | 'update' (edit existing rating)
-let ratingCtx = { mode: 'read', id: null, rating: 0 };
+let ratingCtx = { mode: 'read', id: null, rating: 0, notes: '' };
 
-function openRating({ mode, id, title, currentRating }) {
+function openRating({ mode, id, title, currentRating, notes }) {
   const start = currentRating || 0;
-  ratingCtx = { mode, id, rating: start };
+  ratingCtx = { mode, id, rating: start, notes: notes || '' };
   $('#rating-title').textContent = title;
-  $$('.star').forEach(x => x.classList.toggle('active', parseInt(x.dataset.val, 10) <= start));
+  
+  // Show/hide notes section based on mode
+  const notesSection = $('#rating-notes-section');
+  const notesInput = $('#rating-notes-input');
+  if (mode === 'read') {
+    notesSection.style.display = 'block';
+    notesInput.value = '';
+  } else {
+    notesSection.style.display = 'block';
+    notesInput.value = notes || '';
+  }
+  
+  // Update stars
+  const ratingStars = $$('#rating-stars .star');
+  ratingStars.forEach(x => x.classList.toggle('active', parseInt(x.dataset.val, 10) <= start));
+  
+  // Keep old stars hidden but functional for click handlers
+  $$('#stars .star').forEach(x => x.classList.toggle('active', parseInt(x.dataset.val, 10) <= start));
+  
   $('#btn-confirm-rating').disabled = start === 0;
   $('#btn-skip-rating').textContent = mode === 'update' ? 'Clear rating' : 'No rating';
   $('#rating-modal').classList.add('active');
 }
 
-function closeRating() { $('#rating-modal').classList.remove('active'); }
+function closeRating() { 
+  $('#rating-modal').classList.remove('active');
+  $('#rating-notes-input').value = '';
+}
 
-$$('.star').forEach(s => {
-  s.onclick = () => {
-    const v = parseInt(s.dataset.val, 10);
-    ratingCtx.rating = v;
-    $$('.star').forEach(x => x.classList.toggle('active', parseInt(x.dataset.val, 10) <= v));
-    $('#btn-confirm-rating').disabled = false;
-  };
-});
+// Setup rating stars (both visible and hidden)
+function setupRatingStars() {
+  const allStars = $$('#rating-stars .star, #stars .star');
+  allStars.forEach(s => {
+    s.onclick = () => {
+      const v = parseInt(s.dataset.val, 10);
+      ratingCtx.rating = v;
+      const ratingStars = $$('#rating-stars .star');
+      const oldStars = $$('#stars .star');
+      ratingStars.forEach(x => x.classList.toggle('active', parseInt(x.dataset.val, 10) <= v));
+      oldStars.forEach(x => x.classList.toggle('active', parseInt(x.dataset.val, 10) <= v));
+      $('#btn-confirm-rating').disabled = false;
+    };
+  });
+}
+setupRatingStars();
 
 $('#btn-cancel-rating').onclick = closeRating;
 
@@ -625,6 +683,17 @@ async function submitRating(rating) {
     : `/links/${ratingCtx.id}/rating`;
   try {
     await api('POST', path, { rating });
+    // If marking as read, also save notes
+    if (ratingCtx.mode === 'read') {
+      const notes = $('#rating-notes-input').value;
+      if (notes) {
+        await api('POST', `/links/${ratingCtx.id}/notes`, { notes });
+      }
+    } else if (ratingCtx.mode === 'update') {
+      // If updating rating on read item, also save any notes changes
+      const notes = $('#rating-notes-input').value;
+      await api('POST', `/links/${ratingCtx.id}/notes`, { notes });
+    }
     closeRating();
     if (ratingCtx.mode === 'read') loadQueue();
     else loadRead();
@@ -665,53 +734,53 @@ async function loadRead() {
     }
     return `<span class="rating-stars">${'★'.repeat(item.rating)}</span><span style="color:#ddd">${'★'.repeat(5 - item.rating)}</span>`;
   };
-  list.innerHTML = `
-    <table>
-      <thead>
-        <tr>
-          <th data-sort="title">Title<span class="arrow">${arrow('title')}</span></th>
-          <th data-sort="rating">Rating<span class="arrow">${arrow('rating')}</span></th>
-          <th data-sort="read_at">Read on<span class="arrow">${arrow('read_at')}</span></th>
-          <th>Thoughts</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${sorted.map(item => `
-          <tr>
-            <td>
-              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>
-              ${item.summary ? `<br><small>${escapeHtml(item.summary)}</small>` : ''}
-            </td>
-            <td class="rating" data-id="${item.id}" data-title="${escapeHtml(item.title)}" data-rating="${item.rating ?? ''}" title="Click to edit rating">${ratingCell(item)}</td>
-            <td>${(item.read_at || '').slice(0, 10)}</td>
-            <td><textarea class="read-notes" data-id="${item.id}" placeholder="Your thoughts on this paper...">${escapeHtml(item.notes || '')}</textarea></td>
-            <td>
-              <div class="read-actions">
-                <button class="btn-save-notes" data-id="${item.id}">Save notes</button>
-                <button class="btn-delete-read" data-id="${item.id}">Delete</button>
-              </div>
-            </td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
+
+  const sortControls = `
+    <div style="margin-bottom: 1em; display: flex; gap: 1em; font-size: 0.85em;">
+      <span style="cursor: pointer; color: ${readSort.key === 'title' ? 'var(--accent)' : 'var(--muted)'};" data-sort="title">Title ${arrow('title')}</span>
+      <span style="cursor: pointer; color: ${readSort.key === 'rating' ? 'var(--accent)' : 'var(--muted)'};" data-sort="rating">Rating ${arrow('rating')}</span>
+      <span style="cursor: pointer; color: ${readSort.key === 'read_at' ? 'var(--accent)' : 'var(--muted)'};" data-sort="read_at">Read on ${arrow('read_at')}</span>
+    </div>
   `;
-  list.querySelectorAll('th[data-sort]').forEach(th => {
-    th.onclick = () => {
-      const k = th.dataset.sort;
+
+  list.innerHTML = sortControls + sorted.map(item => `
+    <div class="read-item">
+      <div class="read-item-header">
+        <div style="flex: 1;">
+          <div class="read-item-title">
+            <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>
+          </div>
+          ${item.summary ? `<div class="read-item-summary">${escapeHtml(item.summary)}</div>` : ''}
+          <div class="read-item-meta">
+            <strong>Rating:</strong> <span style="cursor: pointer;" class="rating-edit" data-id="${item.id}" data-title="${escapeHtml(item.title)}" data-rating="${item.rating ?? ''}">${ratingCell(item)}</span>
+            <span style="margin-left: 1em;"><strong>Read:</strong> ${(item.read_at || '').slice(0, 10)}</span>
+          </div>
+        </div>
+      </div>
+      <label style="font-size: 0.85em; display: block; margin-bottom: 0.3em;">Thoughts:</label>
+      <textarea class="read-notes" data-id="${item.id}" placeholder="Your thoughts on this paper...">${escapeHtml(item.notes || '')}</textarea>
+      <div class="read-item-actions" style="margin-top: 0.5em;">
+        <button class="btn-save-notes btn-save-icon btn-icon-small" data-id="${item.id}" title="Save notes">💾</button>
+        <button class="btn-delete-read btn-delete-icon btn-icon-small" data-id="${item.id}" title="Delete paper">🗑️</button>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('[data-sort]').forEach(el => {
+    el.onclick = () => {
+      const k = el.dataset.sort;
       if (readSort.key === k) readSort.dir = readSort.dir === 'asc' ? 'desc' : 'asc';
       else { readSort.key = k; readSort.dir = 'desc'; }
       loadRead();
     };
   });
-  list.querySelectorAll('td.rating').forEach(td => {
-    td.onclick = () => {
-      const r = td.dataset.rating;
+  list.querySelectorAll('.rating-edit').forEach(el => {
+    el.onclick = () => {
+      const r = el.dataset.rating;
       openRating({
         mode: 'update',
-        id: td.dataset.id,
-        title: td.dataset.title,
+        id: el.dataset.id,
+        title: el.dataset.title,
         currentRating: r === '' ? 0 : parseInt(r, 10),
       });
     };

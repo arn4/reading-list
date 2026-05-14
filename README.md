@@ -1,4 +1,4 @@
-# Reading List v0.3
+# Reading List v0.3.1
 
 A local priority-queue reading list. Push links, pairwise-compare to order them,
 read the top of the queue, rate what you finish, and add notes/thoughts on read papers.
@@ -41,8 +41,15 @@ session tokens — lives in `auth.json` next to `app.py` (override with
 server, delete that file, and start the server again — you'll be back at the
 "set up a passkey" screen.
 
-In Docker, the default command stores auth at `/data/auth.json`, so it persists
-in the same mounted volume as `database.json`.
+Docker Compose files:
+- `docker-compose.yml`: local testing (builds from local source and bind-mounts
+  app files)
+- `docker-compose.example.yml`: example production-ish config (pulls
+  `larna/reading-list` image)
+
+In both setups, local `./data` is bind-mounted to `/data` in the container.
+The app reads/writes `/data/database.json` and `/data/auth.json` there
+(`auth.json` is created when you register a passkey).
 
 The session cookie lifetime is **1 day**.
 

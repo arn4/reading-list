@@ -18,10 +18,8 @@ RUN useradd --create-home --uid 1000 app \
 USER app
 
 ENV HOST=0.0.0.0 \
-    PORT=8000 \
-    DATABASE_PATH=/data/database.json \
-    AUTH_FILE_PATH=/data/auth.json
+    PORT=8000
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python app.py --host \"$HOST\" --port \"$PORT\" --database \"$DATABASE_PATH\" --auth-file \"$AUTH_FILE_PATH\""]
+CMD ["sh", "-c", "exec python app.py --host \"$HOST\" --port \"$PORT\" --database /data/database.json --auth-file /data/auth.json"]
