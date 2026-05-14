@@ -1,7 +1,7 @@
 services:
   reading-list:
-    build: .
-    image: reading-list:latest
+    image: "${IMAGE:-larna/reading-list:latest}"
+    pull_policy: always
     container_name: reading-list
     restart: unless-stopped
     env_file:

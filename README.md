@@ -48,6 +48,28 @@ Requires a recent browser that supports the WebAuthn JSON helpers
 Safari 17.4+, Firefox 122+. On localhost the app works over plain HTTP; on any
 other host you must serve it over HTTPS for WebAuthn to function.
 
+## Docker Hub CI
+
+GitHub Actions now builds and pushes a multi-arch image (`linux/amd64`,
+`linux/arm64`) on every push.
+
+Set these repo secrets before enabling it:
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN` (Docker Hub access token)
+
+Optional repo variable:
+
+- `DOCKERHUB_REPOSITORY` (for example `larna/reading-list`; if omitted, it uses
+  `$DOCKERHUB_USERNAME/reading-list`)
+
+Published tags:
+
+- `latest`
+- `v<app version>` (from `VERSION` in `app.py`; re-pushed each run, so an
+  existing version tag is replaced)
+- `<git sha>`
+
 ## How priority works
 
 When you add a link, the server walks you through ~log₂(N) "A vs B"
