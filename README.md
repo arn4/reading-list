@@ -1,4 +1,4 @@
-# Reading List v0.1
+# Reading List v0.2
 
 A local priority-queue reading list. Push links, pairwise-compare to order them,
 read the top of the queue, rate what you finish.
@@ -18,6 +18,7 @@ python app.py                                # http://127.0.0.1:8000
 python app.py --port 9000                    # different port
 python app.py --host 0.0.0.0 --port 8080     # bind to all interfaces
 python app.py --database ~/reading.json      # custom database path
+python app.py --auth-file ~/rl-auth.json     # custom auth file path
 ```
 
 Then open the printed URL in a browser.
@@ -27,6 +28,22 @@ Then open the printed URL in a browser.
 Everything lives in a single JSON file — `database.json` next to `app.py` by
 default, or whatever you pass with `--database`. Safe to inspect, back up, or
 hand-edit while the server is stopped.
+
+## Authentication
+
+Single-user, passkey-only. On the first visit, the app forces you to set up a
+passkey. From then on, every visit requires authenticating with that passkey.
+
+All authentication state — the user id, the registered passkey, and active
+session tokens — lives in `auth.json` next to `app.py` (override with
+`--auth-file`). To reset auth (e.g. lost device, want a new passkey), stop the
+server, delete that file, and start the server again — you'll be back at the
+"set up a passkey" screen.
+
+Requires a recent browser that supports the WebAuthn JSON helpers
+(`PublicKeyCredential.parseCreationOptionsFromJSON` etc.) — Chrome 121+,
+Safari 17.4+, Firefox 122+. On localhost the app works over plain HTTP; on any
+other host you must serve it over HTTPS for WebAuthn to function.
 
 ## How priority works
 

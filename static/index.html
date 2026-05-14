@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Reading List v0.1</title>
+<title>Reading List v0.2</title>
 <style>
   :root {
     --fg: #1a1a1a;
@@ -116,11 +116,56 @@
   .status.ok { color: #0a7d23; }
   .status.err { color: #b00020; }
   .empty { color: var(--muted); padding: 1em; text-align: center; }
+
+  .header { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; }
+  .header .auth-info { color: var(--muted); font-size: 0.85em; }
+  .auth-screen { display: none; text-align: center; padding: 3em 1em; }
+  .auth-screen .card {
+    max-width: 480px; margin: 0 auto; background: var(--card);
+    border: 1px solid var(--border); border-radius: 8px; padding: 2em 1.5em;
+  }
+  .auth-screen h2 { margin-top: 0; }
+  .auth-screen p { color: var(--muted); }
+  .auth-screen .big-btn { font-size: 1.05em; padding: 0.7em 1.4em; margin-top: 0.6em; }
+
+  #app-root, #auth-register, #auth-login, #auth-loading { display: none; }
+  body.state-loading #auth-loading,
+  body.state-register #auth-register,
+  body.state-login #auth-login,
+  body.state-app #app-root { display: block; }
 </style>
 </head>
-<body>
+<body class="state-loading">
 
-<h1>Reading List <span class="ver">v0.1</span></h1>
+<section id="auth-loading" class="auth-screen">
+  <div class="card"><p>Loading…</p></div>
+</section>
+
+<section id="auth-register" class="auth-screen">
+  <div class="card">
+    <h2>Set up a passkey</h2>
+    <p>This reading list is single-user. Create a passkey now to lock the app to you.<br>
+       You can reset by deleting the auth file on disk.</p>
+    <button id="btn-register" class="primary big-btn">Create passkey</button>
+    <div id="register-status" class="status"></div>
+  </div>
+</section>
+
+<section id="auth-login" class="auth-screen">
+  <div class="card">
+    <h2>Sign in</h2>
+    <p>Authenticate with your passkey to continue.</p>
+    <button id="btn-login" class="primary big-btn">Sign in with passkey</button>
+    <div id="login-status" class="status"></div>
+  </div>
+</section>
+
+<div id="app-root">
+
+<div class="header">
+  <h1>Reading List <span class="ver">v0.1</span></h1>
+  <button id="btn-logout" class="btn-icon" title="Sign out">Sign out</button>
+</div>
 
 <div class="tabs">
   <button class="tab active" data-tab="add">Add</button>
@@ -161,6 +206,8 @@
   <h2>Already read</h2>
   <div id="read-list"></div>
 </section>
+
+</div><!-- /#app-root -->
 
 <!-- COMPARE MODAL -->
 <div class="modal-bg" id="compare-modal">
@@ -218,12 +265,113 @@ async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const r = await fetch(path, opts);
+  if (r.status === 401 && !path.startsWith('/auth/')) {
+    setAuthState('login');
+    throw new Error('unauthorized');
+  }
   if (!r.ok) {
     const text = await r.text();
     throw new Error(`${r.status} ${text}`);
   }
   return r.json();
 }
+
+// ---------- AUTH ----------
+function setAuthState(s) {
+  document.body.className = 'state-' + s;
+}
+
+function setAuthStatus(elId, msg, cls) {
+  const el = document.getElementById(elId);
+  el.textContent = msg || '';
+  el.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+function checkWebAuthnSupport() {
+  if (!window.PublicKeyCredential ||
+      typeof PublicKeyCredential.parseCreationOptionsFromJSON !== 'function' ||
+      typeof PublicKeyCredential.parseRequestOptionsFromJSON !== 'function') {
+    return 'Your browser does not support the WebAuthn JSON helpers. Use a recent Chrome, Safari, or Firefox.';
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname) || location.hostname.includes(':')) {
+    return 'WebAuthn does not allow IP addresses. Open this app at http://localhost:' + location.port + '/ instead.';
+  }
+  return null;
+}
+
+function maybeWarnAboutHost() {
+  const err = checkWebAuthnSupport();
+  if (err) {
+    setAuthStatus('register-status', err, 'err');
+    setAuthStatus('login-status', err, 'err');
+  }
+}
+
+async function startup() {
+  try {
+    const status = await api('GET', '/auth/status');
+    if (!status.registered) {
+      setAuthState('register');
+      maybeWarnAboutHost();
+    } else if (!status.authenticated) {
+      setAuthState('login');
+      maybeWarnAboutHost();
+    } else {
+      setAuthState('app');
+      refreshQueueCount();
+    }
+  } catch (e) {
+    setAuthState('login');
+    maybeWarnAboutHost();
+  }
+}
+
+$('#btn-register').onclick = async () => {
+  const err = checkWebAuthnSupport();
+  if (err) { setAuthStatus('register-status', err, 'err'); return; }
+  $('#btn-register').disabled = true;
+  setAuthStatus('register-status', 'Follow your browser prompt…');
+  try {
+    const optsJson = await api('POST', '/auth/register/begin');
+    const publicKey = PublicKeyCredential.parseCreationOptionsFromJSON(optsJson);
+    const cred = await navigator.credentials.create({ publicKey });
+    if (!cred) throw new Error('no credential returned');
+    await api('POST', '/auth/register/complete', cred.toJSON());
+    setAuthStatus('register-status', 'Passkey created.', 'ok');
+    setAuthState('app');
+    refreshQueueCount();
+  } catch (e) {
+    setAuthStatus('register-status', 'Failed: ' + e.message, 'err');
+  } finally {
+    $('#btn-register').disabled = false;
+  }
+};
+
+$('#btn-login').onclick = async () => {
+  const err = checkWebAuthnSupport();
+  if (err) { setAuthStatus('login-status', err, 'err'); return; }
+  $('#btn-login').disabled = true;
+  setAuthStatus('login-status', 'Follow your browser prompt…');
+  try {
+    const optsJson = await api('POST', '/auth/login/begin');
+    const publicKey = PublicKeyCredential.parseRequestOptionsFromJSON(optsJson);
+    const cred = await navigator.credentials.get({ publicKey });
+    if (!cred) throw new Error('no credential returned');
+    await api('POST', '/auth/login/complete', cred.toJSON());
+    setAuthStatus('login-status', '');
+    setAuthState('app');
+    refreshQueueCount();
+  } catch (e) {
+    setAuthStatus('login-status', 'Failed: ' + e.message, 'err');
+  } finally {
+    $('#btn-login').disabled = false;
+  }
+};
+
+$('#btn-logout').onclick = async () => {
+  try { await api('POST', '/auth/logout'); } catch {}
+  setAuthState('login');
+};
 
 // ---------- Tabs ----------
 $$('.tab').forEach(t => {
@@ -544,7 +692,7 @@ async function loadRead() {
 }
 
 // ---------- Init ----------
-refreshQueueCount();
+startup();
 </script>
 </body>
 </html>

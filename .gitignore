@@ -1,6 +1,9 @@
 # Database
 database.json
 
+# Auth (passkey credential + session tokens)
+auth.json
+
 # Python
 __pycache__/
 *.py[cod]

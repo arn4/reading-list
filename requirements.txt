@@ -2,3 +2,4 @@ fastapi>=0.100
 uvicorn>=0.20
 requests>=2.30
 beautifulsoup4>=4.12
+webauthn>=2.0
