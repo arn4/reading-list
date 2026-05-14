@@ -57,8 +57,8 @@ Safari 17.4+, Firefox 122+.
 
 ## Deploying behind a reverse proxy (HTTPS)
 
-The expected production setup is a TLS-terminating reverse proxy (Caddy,
-nginx, Traefik, …) in front of the app. The proxy handles HTTPS; the app
+The expected production setup is a TLS-terminating nginx reverse proxy in front
+of the app. The proxy handles HTTPS; the app
 listens on plain HTTP locally and trusts `X-Forwarded-*` headers from any
 upstream (assume the app is firewalled to the proxy only).
 
@@ -88,16 +88,6 @@ You can tune these with:
 - `RATE_LIMIT_LINKS_PREPARE`
 - `QUEUE_TOP_K` (how many papers the queue tab shows)
 - `SUMMARY_MAX_CHARS` (max length of fetched summary/description)
-
-Minimal Caddyfile:
-
-```
-reading.example.com {
-    reverse_proxy 127.0.0.1:8000
-}
-```
-
-Caddy obtains a Let's Encrypt certificate automatically.
 
 Minimal nginx server block:
 
