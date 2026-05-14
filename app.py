@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import uuid
+from contextlib import asynccontextmanager
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,8 @@ SESSION_MAX_AGE_SECONDS = 60 * 60 * 24  # 1 day
 RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
 RATE_LIMIT_AUTH_LOGIN_BEGIN = int(os.environ.get("RATE_LIMIT_AUTH_LOGIN_BEGIN", "10"))
 RATE_LIMIT_LINKS_PREPARE = int(os.environ.get("RATE_LIMIT_LINKS_PREPARE", "20"))
+QUEUE_TOP_K_DEFAULT = int(os.environ.get("QUEUE_TOP_K", "10"))
+SUMMARY_MAX_CHARS = int(os.environ.get("SUMMARY_MAX_CHARS", "300"))
 
 auth_store: AuthStore = AuthStore(AUTH_FILE)
 
@@ -39,6 +42,33 @@ _rate_limit_hits: Dict[Tuple[str, str], Deque[float]] = {}
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_data(data: Dict[str, Any]) -> tuple[Dict[str, List[Dict[str, Any]]], bool]:
+    changed = False
+    queue = data.get("queue")
+    read = data.get("read")
+    if not isinstance(queue, list):
+        queue = []
+        changed = True
+    if not isinstance(read, list):
+        read = []
+        changed = True
+
+    for item in queue:
+        if "summary" not in item:
+            item["summary"] = ""
+            changed = True
+
+    for item in read:
+        if "summary" not in item:
+            item["summary"] = ""
+            changed = True
+        if "notes" not in item:
+            item["notes"] = ""
+            changed = True
+
+    return {"queue": queue, "read": read}, changed
 
 
 def load_data() -> Dict[str, List[Dict[str, Any]]]:
@@ -88,11 +118,29 @@ class RatingBody(BaseModel):
     rating: Optional[int] = None
 
 
+class NotesBody(BaseModel):
+    notes: str = ""
+
+
 class MoveBody(BaseModel):
     direction: str  # "up" | "down"
 
 
-app = FastAPI(title="Reading List", version=VERSION)
+def run_startup_migrations():
+    with _lock:
+        data = load_data()
+        normalized, changed = _normalize_data(data)
+        if changed:
+            save_data(normalized)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    run_startup_migrations()
+    yield
+
+
+app = FastAPI(title="Reading List", version=VERSION, lifespan=lifespan)
 
 
 PUBLIC_PATHS = {"/", "/favicon.ico"}
@@ -213,7 +261,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.post("/links/prepare")
 def prepare(request: Request, body: PrepareBody):
     _enforce_rate_limit(request, "links/prepare", RATE_LIMIT_LINKS_PREPARE)
-    meta = fetch_metadata(body.url)
+    meta = fetch_metadata(body.url, max_summary_len=SUMMARY_MAX_CHARS)
     return {"url": body.url, "title": meta["title"], "summary": meta["summary"]}
 
 
@@ -296,9 +344,12 @@ def insert_step(body: StepBody):
 
 
 @app.get("/links/top")
-def top(k: int = 10):
+def top(k: Optional[int] = None):
+    limit = QUEUE_TOP_K_DEFAULT if k is None else k
+    if limit < 0:
+        raise HTTPException(400, "k must be >= 0")
     data = load_data()
-    return data["queue"][:k]
+    return data["queue"][:limit]
 
 
 @app.get("/links/queue/count")
@@ -319,6 +370,8 @@ def mark_read(link_id: str, body: RatingBody):
         item = data["queue"].pop(idx)
         item["read_at"] = now_iso()
         item["rating"] = body.rating
+        item["summary"] = item.get("summary", "")
+        item["notes"] = item.get("notes", "")
         data["read"].append(item)
         save_data(data)
     return item
@@ -334,6 +387,18 @@ def update_rating(link_id: str, body: RatingBody):
         if idx is None:
             raise HTTPException(404, "not in read list")
         data["read"][idx]["rating"] = body.rating
+        save_data(data)
+        return data["read"][idx]
+
+
+@app.post("/links/{link_id}/notes")
+def update_notes(link_id: str, body: NotesBody):
+    with _lock:
+        data = load_data()
+        idx = next((i for i, x in enumerate(data["read"]) if x["id"] == link_id), None)
+        if idx is None:
+            raise HTTPException(404, "not in read list")
+        data["read"][idx]["notes"] = body.notes
         save_data(data)
         return data["read"][idx]
 
@@ -409,6 +474,14 @@ def read_list():
 @app.get("/version")
 def version():
     return {"version": VERSION}
+
+
+@app.get("/settings")
+def settings():
+    return {
+        "queue_top_k": QUEUE_TOP_K_DEFAULT,
+        "summary_max_chars": SUMMARY_MAX_CHARS,
+    }
 
 
 def main():

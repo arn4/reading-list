@@ -1,7 +1,7 @@
 # Reading List v0.3
 
 A local priority-queue reading list. Push links, pairwise-compare to order them,
-read the top of the queue, rate what you finish.
+read the top of the queue, rate what you finish, and add notes/thoughts on read papers.
 
 ## Install
 
@@ -86,6 +86,8 @@ You can tune these with:
 - `RATE_LIMIT_WINDOW_SECONDS`
 - `RATE_LIMIT_AUTH_LOGIN_BEGIN`
 - `RATE_LIMIT_LINKS_PREPARE`
+- `QUEUE_TOP_K` (how many papers the queue tab shows)
+- `SUMMARY_MAX_CHARS` (max length of fetched summary/description)
 
 Minimal Caddyfile:
 
@@ -158,7 +160,9 @@ the queue, so you can re-prioritize without deleting + re-adding.
 | GET    | `/links/queue/count`       | Total queue size                     |
 | POST   | `/links/{id}/read`         | Move to read list; rating 1..5 or null |
 | POST   | `/links/{id}/rating`       | Set/clear rating on a read item      |
+| POST   | `/links/{id}/notes`        | Save notes/thoughts for a read item  |
 | POST   | `/links/{id}/move`         | Move a queued item up or down by one |
 | POST   | `/links/{id}/bump`         | Re-prioritize a queued item          |
 | DELETE | `/links/{id}`              | Remove from queue or read list       |
 | GET    | `/links/read`              | Read list                            |
+| GET    | `/settings`                | Runtime UI settings from env         |

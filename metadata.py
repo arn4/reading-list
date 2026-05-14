@@ -2,7 +2,12 @@ import requests
 from bs4 import BeautifulSoup
 
 
-def fetch_metadata(url: str, timeout: int = 5, max_bytes: int = 2_000_000) -> dict:
+def fetch_metadata(
+    url: str,
+    timeout: int = 5,
+    max_bytes: int = 2_000_000,
+    max_summary_len: int = 300,
+) -> dict:
     try:
         headers = {"User-Agent": "Mozilla/5.0 (compatible; ReadingList/0.1)"}
         r = requests.get(url, timeout=timeout, headers=headers, stream=True)
@@ -16,7 +21,7 @@ def fetch_metadata(url: str, timeout: int = 5, max_bytes: int = 2_000_000) -> di
 
         soup = BeautifulSoup(content, "html.parser")
         title = _extract_title(soup) or url
-        summary = _extract_summary(soup) or ""
+        summary = _extract_summary(soup, max_summary_len) or ""
         return {"title": title.strip(), "summary": summary.strip()}
     except Exception as e:
         return {"title": url, "summary": "", "error": str(e)}

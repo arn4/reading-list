@@ -109,6 +109,8 @@
   td.rating:hover { background: var(--accent-bg); }
   .rating-stars { color: var(--gold); }
   .rating-empty { color: var(--muted); font-style: italic; font-size: 0.85em; }
+  .read-notes { min-height: 3.2em; font-size: 0.85em; }
+  .read-actions { display: flex; gap: 0.4em; flex-wrap: wrap; }
 
   .btn-icon { padding: 0.35em 0.55em; font-size: 0.85em; line-height: 1; }
 
@@ -197,7 +199,7 @@
 
 <!-- QUEUE -->
 <section class="panel" id="panel-queue">
-  <h2>Reading queue — top 10</h2>
+  <h2 id="queue-heading">Reading queue — top 10</h2>
   <div id="queue-list"></div>
 </section>
 
@@ -255,6 +257,7 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
+let appSettings = { queue_top_k: 10, summary_max_chars: 300 };
 
 function escapeHtml(s) {
   if (s == null) return '';
@@ -318,6 +321,7 @@ async function startup() {
       maybeWarnAboutHost();
     } else {
       setAuthState('app');
+      await loadSettings();
       refreshQueueCount();
     }
   } catch (e) {
@@ -339,6 +343,7 @@ $('#btn-register').onclick = async () => {
     await api('POST', '/auth/register/complete', cred.toJSON());
     setAuthStatus('register-status', 'Passkey created.', 'ok');
     setAuthState('app');
+    await loadSettings();
     refreshQueueCount();
   } catch (e) {
     setAuthStatus('register-status', 'Failed: ' + e.message, 'err');
@@ -360,6 +365,7 @@ $('#btn-login').onclick = async () => {
     await api('POST', '/auth/login/complete', cred.toJSON());
     setAuthStatus('login-status', '');
     setAuthState('app');
+    await loadSettings();
     refreshQueueCount();
   } catch (e) {
     setAuthStatus('login-status', 'Failed: ' + e.message, 'err');
@@ -383,6 +389,18 @@ function switchTab(name) {
   $$('.panel').forEach(x => x.classList.toggle('active', x.id === 'panel-' + name));
   if (name === 'queue') loadQueue();
   if (name === 'read') loadRead();
+}
+
+function applySettings() {
+  $('#queue-heading').textContent = `Reading queue — top ${appSettings.queue_top_k}`;
+  $('#add-summary').setAttribute('maxlength', String(appSettings.summary_max_chars));
+}
+
+async function loadSettings() {
+  try {
+    appSettings = await api('GET', '/settings');
+  } catch {}
+  applySettings();
 }
 
 // ---------- ADD ----------
@@ -503,7 +521,7 @@ let totalQueueCount = 0;
 
 async function loadQueue() {
   await refreshQueueCount();
-  const items = await api('GET', '/links/top?k=10');
+  const items = await api('GET', '/links/top');
   const list = $('#queue-list');
   if (items.length === 0) {
     list.innerHTML = '<div class="empty">Queue is empty. Add a link from the Add tab.</div>';
@@ -540,7 +558,7 @@ $('#queue-list').addEventListener('click', async (e) => {
   if (a === 'bump') await bumpItem(btn.dataset.id);
   if (a === 'up' || a === 'down') await moveItem(btn.dataset.id, a);
   if (a === 'delete') {
-    if (!confirm('Remove from queue?')) return;
+    if (!confirm('Delete this paper from the queue?')) return;
     await api('DELETE', '/links/' + btn.dataset.id);
     loadQueue();
   }
@@ -654,6 +672,8 @@ async function loadRead() {
           <th data-sort="title">Title<span class="arrow">${arrow('title')}</span></th>
           <th data-sort="rating">Rating<span class="arrow">${arrow('rating')}</span></th>
           <th data-sort="read_at">Read on<span class="arrow">${arrow('read_at')}</span></th>
+          <th>Thoughts</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -665,6 +685,13 @@ async function loadRead() {
             </td>
             <td class="rating" data-id="${item.id}" data-title="${escapeHtml(item.title)}" data-rating="${item.rating ?? ''}" title="Click to edit rating">${ratingCell(item)}</td>
             <td>${(item.read_at || '').slice(0, 10)}</td>
+            <td><textarea class="read-notes" data-id="${item.id}" placeholder="Your thoughts on this paper...">${escapeHtml(item.notes || '')}</textarea></td>
+            <td>
+              <div class="read-actions">
+                <button class="btn-save-notes" data-id="${item.id}">Save notes</button>
+                <button class="btn-delete-read" data-id="${item.id}">Delete</button>
+              </div>
+            </td>
           </tr>
         `).join('')}
       </tbody>
@@ -687,6 +714,29 @@ async function loadRead() {
         title: td.dataset.title,
         currentRating: r === '' ? 0 : parseInt(r, 10),
       });
+    };
+  });
+  list.querySelectorAll('.btn-save-notes').forEach(btn => {
+    btn.onclick = async () => {
+      const notesEl = list.querySelector(`.read-notes[data-id="${btn.dataset.id}"]`);
+      if (!notesEl) return;
+      try {
+        await api('POST', `/links/${btn.dataset.id}/notes`, { notes: notesEl.value });
+      } catch (e) {
+        alert('Saving notes failed: ' + e.message);
+      }
+    };
+  });
+  list.querySelectorAll('.btn-delete-read').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('Delete this paper from the read list?')) return;
+      try {
+        await api('DELETE', '/links/' + btn.dataset.id);
+        loadRead();
+        refreshQueueCount();
+      } catch (e) {
+        alert('Delete failed: ' + e.message);
+      }
     };
   });
 }
