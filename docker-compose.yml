@@ -1,0 +1,15 @@
+services:
+  reading-list:
+    build: .
+    image: reading-list:latest
+    container_name: reading-list
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${HOST_PORT:-8000}:${PORT:-8000}"
+    volumes:
+      - reading-list-data:/data
+
+volumes:
+  reading-list-data:

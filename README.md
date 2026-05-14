@@ -1,0 +1,55 @@
+# Reading List v0.1
+
+A local priority-queue reading list. Push links, pairwise-compare to order them,
+read the top of the queue, rate what you finish.
+
+## Install
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Run
+
+```sh
+python app.py                                # http://127.0.0.1:8000
+python app.py --port 9000                    # different port
+python app.py --host 0.0.0.0 --port 8080     # bind to all interfaces
+python app.py --database ~/reading.json      # custom database path
+```
+
+Then open the printed URL in a browser.
+
+## Storage
+
+Everything lives in a single JSON file — `database.json` next to `app.py` by
+default, or whatever you pass with `--database`. Safe to inspect, back up, or
+hand-edit while the server is stopped.
+
+## How priority works
+
+When you add a link, the server walks you through ~log₂(N) "A vs B"
+comparisons to binary-search its slot in the queue. The **≈ Roughly equal**
+button stops early and places the new item at the current midpoint.
+
+The **Bump** button on a queued item runs the same flow against the rest of
+the queue, so you can re-prioritize without deleting + re-adding.
+
+## Endpoints
+
+| Method | Path                       | Purpose                              |
+|--------|----------------------------|--------------------------------------|
+| GET    | `/`                        | UI                                   |
+| POST   | `/links/prepare`           | Fetch title + summary for a URL      |
+| POST   | `/links/insert/start`      | Begin insertion, get first compare   |
+| POST   | `/links/insert/step`       | Submit a compare; get next or done   |
+| GET    | `/links/top?k=10`          | Top-K of the queue                   |
+| GET    | `/links/queue/count`       | Total queue size                     |
+| POST   | `/links/{id}/read`         | Move to read list; rating 1..5 or null |
+| POST   | `/links/{id}/rating`       | Set/clear rating on a read item      |
+| POST   | `/links/{id}/move`         | Move a queued item up or down by one |
+| POST   | `/links/{id}/bump`         | Re-prioritize a queued item          |
+| DELETE | `/links/{id}`              | Remove from queue or read list       |
+| GET    | `/links/read`              | Read list                            |
