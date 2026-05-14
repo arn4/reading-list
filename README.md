@@ -1,4 +1,4 @@
-# Reading List v0.2.1
+# Reading List v0.3
 
 A local priority-queue reading list. Push links, pairwise-compare to order them,
 read the top of the queue, rate what you finish.
@@ -19,6 +19,7 @@ python app.py --port 9000                    # different port
 python app.py --host 0.0.0.0 --port 8080     # bind to all interfaces
 python app.py --database ~/reading.json      # custom database path
 python app.py --auth-file ~/rl-auth.json     # custom auth file path
+python app.py --workers 1                    # required: single worker only
 ```
 
 Then open the printed URL in a browser.
@@ -43,10 +44,76 @@ server, delete that file, and start the server again — you'll be back at the
 In Docker, the default command stores auth at `/data/auth.json`, so it persists
 in the same mounted volume as `database.json`.
 
+The session cookie lifetime is **1 day**.
+
 Requires a recent browser that supports the WebAuthn JSON helpers
 (`PublicKeyCredential.parseCreationOptionsFromJSON` etc.) — Chrome 121+,
-Safari 17.4+, Firefox 122+. On localhost the app works over plain HTTP; on any
-other host you must serve it over HTTPS for WebAuthn to function.
+Safari 17.4+, Firefox 122+.
+
+> **Passkeys require a secure context.** WebAuthn only runs over
+> `http://localhost` or `https://<your-domain>`. If you expose the app on a
+> public host without HTTPS, the browser will refuse to create or use the
+> passkey and **authentication will simply not work** — there is no fallback.
+
+## Deploying behind a reverse proxy (HTTPS)
+
+The expected production setup is a TLS-terminating reverse proxy (Caddy,
+nginx, Traefik, …) in front of the app. The proxy handles HTTPS; the app
+listens on plain HTTP locally and trusts `X-Forwarded-*` headers from any
+upstream (assume the app is firewalled to the proxy only).
+
+This app currently must run with exactly one worker process (`--workers 1`)
+because pending WebAuthn challenges and file-write locking are process-local.
+Do not run `uvicorn --workers >1` for this build.
+
+To tell the app it's running behind HTTPS — which makes the session cookie
+`Secure` — set the `USE_HTTPS` env var or pass `--https`:
+
+```sh
+python app.py --https                 # explicit flag
+USE_HTTPS=1 python app.py             # via env var
+python app.py --no-https              # explicitly disable
+```
+
+The default (HTTPS off) is the right choice for local development on
+`http://localhost`. Turn it on in your `.env` for any public deployment.
+
+Built-in endpoint rate limits:
+- `POST /auth/login/begin`: default 10 requests per 60 seconds per client IP
+- `POST /links/prepare`: default 20 requests per 60 seconds per client IP
+
+You can tune these with:
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_AUTH_LOGIN_BEGIN`
+- `RATE_LIMIT_LINKS_PREPARE`
+
+Minimal Caddyfile:
+
+```
+reading.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+Caddy obtains a Let's Encrypt certificate automatically.
+
+Minimal nginx server block:
+
+```
+server {
+    listen 443 ssl;
+    server_name reading.example.com;
+    ssl_certificate     /etc/letsencrypt/live/reading.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/reading.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
 
 ## Docker Hub CI
 
