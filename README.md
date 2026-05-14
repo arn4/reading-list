@@ -19,6 +19,7 @@ python app.py --port 9000                    # different port
 python app.py --host 0.0.0.0 --port 8080     # bind to all interfaces
 python app.py --database ~/reading.json      # custom database path
 python app.py --auth-file ~/rl-auth.json     # custom auth file path
+python app.py --workers 1                    # required: single worker only
 ```
 
 Then open the printed URL in a browser.
@@ -40,6 +41,8 @@ session tokens — lives in `auth.json` next to `app.py` (override with
 server, delete that file, and start the server again — you'll be back at the
 "set up a passkey" screen.
 
+The session cookie lifetime is **1 day**.
+
 Requires a recent browser that supports the WebAuthn JSON helpers
 (`PublicKeyCredential.parseCreationOptionsFromJSON` etc.) — Chrome 121+,
 Safari 17.4+, Firefox 122+.
@@ -56,6 +59,10 @@ nginx, Traefik, …) in front of the app. The proxy handles HTTPS; the app
 listens on plain HTTP locally and trusts `X-Forwarded-*` headers from any
 upstream (assume the app is firewalled to the proxy only).
 
+This app currently must run with exactly one worker process (`--workers 1`)
+because pending WebAuthn challenges and file-write locking are process-local.
+Do not run `uvicorn --workers >1` for this build.
+
 To tell the app it's running behind HTTPS — which makes the session cookie
 `Secure` — set the `USE_HTTPS` env var or pass `--https`:
 
@@ -67,6 +74,15 @@ python app.py --no-https              # explicitly disable
 
 The default (HTTPS off) is the right choice for local development on
 `http://localhost`. Turn it on in your `.env` for any public deployment.
+
+Built-in endpoint rate limits:
+- `POST /auth/login/begin`: default 10 requests per 60 seconds per client IP
+- `POST /links/prepare`: default 20 requests per 60 seconds per client IP
+
+You can tune these with:
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_AUTH_LOGIN_BEGIN`
+- `RATE_LIMIT_LINKS_PREPARE`
 
 Minimal Caddyfile:
 

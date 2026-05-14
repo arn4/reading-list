@@ -38,6 +38,7 @@ def test_cookie_has_no_secure_flag_when_https_disabled(reset_https):
     assert "rl_session=tok-plain" in header
     assert "HttpOnly" in header
     assert "SameSite=lax" in header
+    assert "Max-Age=86400" in header
     assert "Secure" not in header, "Secure must NOT be set when HTTPS is off"
 
 
@@ -50,6 +51,7 @@ def test_cookie_has_secure_flag_when_https_enabled(reset_https):
     assert "rl_session=tok-tls" in header
     assert "HttpOnly" in header
     assert "SameSite=lax" in header
+    assert "Max-Age=86400" in header
     assert "Secure" in header, "Secure must be set when HTTPS is on"
 
 

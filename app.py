@@ -3,9 +3,11 @@ import json
 import os
 import threading
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from time import monotonic
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -23,10 +25,16 @@ STATIC_DIR = ROOT / "static"
 
 TRUTHY = {"1", "true", "yes", "on"}
 HTTPS_ENABLED: bool = os.environ.get("USE_HTTPS", "").lower() in TRUTHY
+SESSION_MAX_AGE_SECONDS = 60 * 60 * 24  # 1 day
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
+RATE_LIMIT_AUTH_LOGIN_BEGIN = int(os.environ.get("RATE_LIMIT_AUTH_LOGIN_BEGIN", "10"))
+RATE_LIMIT_LINKS_PREPARE = int(os.environ.get("RATE_LIMIT_LINKS_PREPARE", "20"))
 
 auth_store: AuthStore = AuthStore(AUTH_FILE)
 
 _lock = threading.Lock()
+_rate_limit_lock = threading.Lock()
+_rate_limit_hits: Dict[Tuple[str, str], Deque[float]] = {}
 
 
 def now_iso() -> str:
@@ -110,9 +118,34 @@ def _set_session_cookie(resp: Response, token: str) -> None:
         httponly=True,
         secure=HTTPS_ENABLED,
         samesite="lax",
-        max_age=60 * 60 * 24 * 365,
+        max_age=SESSION_MAX_AGE_SECONDS,
         path="/",
     )
+
+
+def _client_ip(request: Request) -> str:
+    client = request.client
+    if client is None:
+        return "unknown"
+    return client.host
+
+
+def _enforce_rate_limit(request: Request, scope: str, limit: int) -> None:
+    if limit <= 0:
+        return
+    now = monotonic()
+    cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+    key = (scope, _client_ip(request))
+    with _rate_limit_lock:
+        bucket = _rate_limit_hits.setdefault(key, deque())
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"rate limit exceeded for {scope}: max {limit} requests/{RATE_LIMIT_WINDOW_SECONDS}s",
+            )
+        bucket.append(now)
 
 
 @app.get("/auth/status")
@@ -144,6 +177,7 @@ async def auth_register_complete(request: Request):
 @app.post("/auth/login/begin")
 def auth_login_begin(request: Request):
     assert auth_store is not None
+    _enforce_rate_limit(request, "auth/login/begin", RATE_LIMIT_AUTH_LOGIN_BEGIN)
     return Response(content=auth_store.begin_authentication(request), media_type="application/json")
 
 
@@ -177,7 +211,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.post("/links/prepare")
-def prepare(body: PrepareBody):
+def prepare(request: Request, body: PrepareBody):
+    _enforce_rate_limit(request, "links/prepare", RATE_LIMIT_LINKS_PREPARE)
     meta = fetch_metadata(body.url)
     return {"url": body.url, "title": meta["title"], "summary": meta["summary"]}
 
@@ -398,7 +433,19 @@ def main():
         help="treat the deployment as HTTPS — sets the session cookie Secure flag. "
              "Default reads from the USE_HTTPS env var (truthy values: 1/true/yes/on).",
     )
+    default_workers = int(os.environ.get("WEB_CONCURRENCY", os.environ.get("UVICORN_WORKERS", "1")))
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=default_workers,
+        help="number of worker processes. Must be 1 for this app (default: 1).",
+    )
     args = p.parse_args()
+    if args.workers != 1:
+        p.error(
+            "This app currently requires exactly one worker because pending WebAuthn challenges "
+            "and locks are process-local. Use --workers 1."
+        )
     DATA_FILE = Path(args.database).expanduser().resolve()
     AUTH_FILE = Path(args.auth_file).expanduser().resolve()
     HTTPS_ENABLED = args.https
@@ -409,6 +456,8 @@ def main():
         f"Reading List v{VERSION} — open http://{display_host}:{args.port}\n"
         f"  (WebAuthn requires a domain name — do not use an IP address)\n"
         f"  https: {'on (cookies marked Secure)' if HTTPS_ENABLED else 'off'}\n"
+        f"  session cookie max-age: {SESSION_MAX_AGE_SECONDS // 3600}h\n"
+        f"  workers: {args.workers}\n"
         f"  db:    {DATA_FILE}\n"
         f"  auth:  {AUTH_FILE} ({'registered' if auth_store.is_registered() else 'not registered yet'})"
     )
@@ -416,6 +465,7 @@ def main():
         app,
         host=args.host,
         port=args.port,
+        workers=args.workers,
         proxy_headers=True,
         forwarded_allow_ips="*",
     )
