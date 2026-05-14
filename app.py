@@ -7,17 +7,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from auth import SESSION_COOKIE, AuthStore
 from metadata import fetch_metadata
 
-VERSION = "0.1"
+VERSION = "0.2"
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "database.json"
+AUTH_FILE = ROOT / "auth.json"
 STATIC_DIR = ROOT / "static"
+
+auth_store: AuthStore = AuthStore(AUTH_FILE)
 
 _lock = threading.Lock()
 
@@ -78,6 +82,86 @@ class MoveBody(BaseModel):
 
 
 app = FastAPI(title="Reading List", version=VERSION)
+
+
+PUBLIC_PATHS = {"/", "/favicon.ico"}
+PUBLIC_PREFIXES = ("/static/", "/auth/")
+
+
+@app.middleware("http")
+async def require_auth(request: Request, call_next):
+    path = request.url.path
+    if path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES):
+        return await call_next(request)
+    assert auth_store is not None
+    token = request.cookies.get(SESSION_COOKIE)
+    if not auth_store.has_session(token):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+def _set_session_cookie(resp: Response, token: str) -> None:
+    resp.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 365,
+        path="/",
+    )
+
+
+@app.get("/auth/status")
+def auth_status(request: Request):
+    assert auth_store is not None
+    token = request.cookies.get(SESSION_COOKIE)
+    return {
+        "registered": auth_store.is_registered(),
+        "authenticated": auth_store.has_session(token),
+    }
+
+
+@app.post("/auth/register/begin")
+def auth_register_begin(request: Request):
+    assert auth_store is not None
+    return Response(content=auth_store.begin_registration(request), media_type="application/json")
+
+
+@app.post("/auth/register/complete")
+async def auth_register_complete(request: Request):
+    assert auth_store is not None
+    credential = await request.json()
+    token = auth_store.complete_registration(request, credential)
+    resp = JSONResponse({"ok": True})
+    _set_session_cookie(resp, token)
+    return resp
+
+
+@app.post("/auth/login/begin")
+def auth_login_begin(request: Request):
+    assert auth_store is not None
+    return Response(content=auth_store.begin_authentication(request), media_type="application/json")
+
+
+@app.post("/auth/login/complete")
+async def auth_login_complete(request: Request):
+    assert auth_store is not None
+    credential = await request.json()
+    token = auth_store.complete_authentication(request, credential)
+    resp = JSONResponse({"ok": True})
+    _set_session_cookie(resp, token)
+    return resp
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request):
+    assert auth_store is not None
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        auth_store.revoke_session(token)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
 
 
 @app.get("/")
@@ -289,7 +373,7 @@ def version():
 
 
 def main():
-    global DATA_FILE
+    global DATA_FILE, AUTH_FILE, auth_store
     p = argparse.ArgumentParser(description=f"Reading List v{VERSION}")
     p.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
     p.add_argument("--port", type=int, default=8000, help="bind port (default: 8000)")
@@ -298,10 +382,23 @@ def main():
         default=str(DATA_FILE),
         help="path to JSON database file (default: database.json)",
     )
+    p.add_argument(
+        "--auth-file",
+        default=str(AUTH_FILE),
+        help="path to passkey/auth file (default: auth.json). Delete this file to reset auth.",
+    )
     args = p.parse_args()
     DATA_FILE = Path(args.database).expanduser().resolve()
+    AUTH_FILE = Path(args.auth_file).expanduser().resolve()
+    auth_store = AuthStore(AUTH_FILE)
     import uvicorn
-    print(f"Reading List v{VERSION} — http://{args.host}:{args.port} — db: {DATA_FILE}")
+    display_host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0", "::1", "::") else args.host
+    print(
+        f"Reading List v{VERSION} — open http://{display_host}:{args.port}\n"
+        f"  (WebAuthn requires a domain name — do not use an IP address)\n"
+        f"  db:   {DATA_FILE}\n"
+        f"  auth: {AUTH_FILE} ({'registered' if auth_store.is_registered() else 'not registered yet'})"
+    )
     uvicorn.run(app, host=args.host, port=args.port)
 
 
