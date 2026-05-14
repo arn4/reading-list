@@ -42,8 +42,59 @@ server, delete that file, and start the server again — you'll be back at the
 
 Requires a recent browser that supports the WebAuthn JSON helpers
 (`PublicKeyCredential.parseCreationOptionsFromJSON` etc.) — Chrome 121+,
-Safari 17.4+, Firefox 122+. On localhost the app works over plain HTTP; on any
-other host you must serve it over HTTPS for WebAuthn to function.
+Safari 17.4+, Firefox 122+.
+
+> **Passkeys require a secure context.** WebAuthn only runs over
+> `http://localhost` or `https://<your-domain>`. If you expose the app on a
+> public host without HTTPS, the browser will refuse to create or use the
+> passkey and **authentication will simply not work** — there is no fallback.
+
+## Deploying behind a reverse proxy (HTTPS)
+
+The expected production setup is a TLS-terminating reverse proxy (Caddy,
+nginx, Traefik, …) in front of the app. The proxy handles HTTPS; the app
+listens on plain HTTP locally and trusts `X-Forwarded-*` headers from any
+upstream (assume the app is firewalled to the proxy only).
+
+To tell the app it's running behind HTTPS — which makes the session cookie
+`Secure` — set the `USE_HTTPS` env var or pass `--https`:
+
+```sh
+python app.py --https                 # explicit flag
+USE_HTTPS=1 python app.py             # via env var
+python app.py --no-https              # explicitly disable
+```
+
+The default (HTTPS off) is the right choice for local development on
+`http://localhost`. Turn it on in your `.env` for any public deployment.
+
+Minimal Caddyfile:
+
+```
+reading.example.com {
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+Caddy obtains a Let's Encrypt certificate automatically.
+
+Minimal nginx server block:
+
+```
+server {
+    listen 443 ssl;
+    server_name reading.example.com;
+    ssl_certificate     /etc/letsencrypt/live/reading.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/reading.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
 
 ## How priority works
 

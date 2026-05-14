@@ -21,6 +21,9 @@ DATA_FILE = ROOT / "database.json"
 AUTH_FILE = ROOT / "auth.json"
 STATIC_DIR = ROOT / "static"
 
+TRUTHY = {"1", "true", "yes", "on"}
+HTTPS_ENABLED: bool = os.environ.get("USE_HTTPS", "").lower() in TRUTHY
+
 auth_store: AuthStore = AuthStore(AUTH_FILE)
 
 _lock = threading.Lock()
@@ -105,6 +108,7 @@ def _set_session_cookie(resp: Response, token: str) -> None:
         SESSION_COOKIE,
         token,
         httponly=True,
+        secure=HTTPS_ENABLED,
         samesite="lax",
         max_age=60 * 60 * 24 * 365,
         path="/",
@@ -373,7 +377,7 @@ def version():
 
 
 def main():
-    global DATA_FILE, AUTH_FILE, auth_store
+    global DATA_FILE, AUTH_FILE, auth_store, HTTPS_ENABLED
     p = argparse.ArgumentParser(description=f"Reading List v{VERSION}")
     p.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
     p.add_argument("--port", type=int, default=8000, help="bind port (default: 8000)")
@@ -387,19 +391,34 @@ def main():
         default=str(AUTH_FILE),
         help="path to passkey/auth file (default: auth.json). Delete this file to reset auth.",
     )
+    p.add_argument(
+        "--https",
+        action=argparse.BooleanOptionalAction,
+        default=HTTPS_ENABLED,
+        help="treat the deployment as HTTPS — sets the session cookie Secure flag. "
+             "Default reads from the USE_HTTPS env var (truthy values: 1/true/yes/on).",
+    )
     args = p.parse_args()
     DATA_FILE = Path(args.database).expanduser().resolve()
     AUTH_FILE = Path(args.auth_file).expanduser().resolve()
+    HTTPS_ENABLED = args.https
     auth_store = AuthStore(AUTH_FILE)
     import uvicorn
     display_host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0", "::1", "::") else args.host
     print(
         f"Reading List v{VERSION} — open http://{display_host}:{args.port}\n"
         f"  (WebAuthn requires a domain name — do not use an IP address)\n"
-        f"  db:   {DATA_FILE}\n"
-        f"  auth: {AUTH_FILE} ({'registered' if auth_store.is_registered() else 'not registered yet'})"
+        f"  https: {'on (cookies marked Secure)' if HTTPS_ENABLED else 'off'}\n"
+        f"  db:    {DATA_FILE}\n"
+        f"  auth:  {AUTH_FILE} ({'registered' if auth_store.is_registered() else 'not registered yet'})"
     )
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
 
 
 if __name__ == "__main__":
