@@ -1,4 +1,4 @@
-# Reading List v0.2
+# Reading List v0.2.1
 
 A local priority-queue reading list. Push links, pairwise-compare to order them,
 read the top of the queue, rate what you finish.
@@ -39,6 +39,9 @@ session tokens — lives in `auth.json` next to `app.py` (override with
 `--auth-file`). To reset auth (e.g. lost device, want a new passkey), stop the
 server, delete that file, and start the server again — you'll be back at the
 "set up a passkey" screen.
+
+In Docker, the default command stores auth at `/data/auth.json`, so it persists
+in the same mounted volume as `database.json`.
 
 Requires a recent browser that supports the WebAuthn JSON helpers
 (`PublicKeyCredential.parseCreationOptionsFromJSON` etc.) — Chrome 121+,

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from auth import SESSION_COOKIE, AuthStore
 from metadata import fetch_metadata
 
-VERSION = "0.2"
+VERSION = "0.2.1"
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "database.json"
 AUTH_FILE = ROOT / "auth.json"
